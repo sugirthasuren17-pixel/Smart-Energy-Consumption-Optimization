@@ -1,386 +1,513 @@
-
-from pathlib import Path
-
+import streamlit as st
 import pandas as pd
 import plotly.express as px
-import streamlit as st
+from pathlib import Path
 
-# ---------------- PAGE SETTINGS ----------------
+# ---------------- PAGE CONFIGURATION ----------------
 st.set_page_config(
     page_title="Smart Energy Dashboard",
     page_icon="⚡",
     layout="wide"
 )
 
-# ---------------- CUSTOM STYLE ----------------
+# ---------------- CUSTOM DESIGN ----------------
 st.markdown("""
 <style>
-.main {
-    background-color: #f5f8fc;
+.stApp {
+    background-color: #f4f8f6;
 }
-.block-container {
-    padding-top: 1.5rem;
+[data-testid="stSidebar"] {
+    background-color: #e3f1e9;
 }
-[data-testid="stMetric"] {
-    background-color: white;
+h1, h2, h3 {
+    color: #12664f;
+}
+div[data-testid="stMetric"] {
+    background: white;
     padding: 18px;
     border-radius: 12px;
-    border: 1px solid #e5eaf2;
+    border: 1px solid #d7e7df;
 }
 </style>
 """, unsafe_allow_html=True)
 
-# ---------------- LOAD EXCEL DATASET ----------------
-PROJECT_DIR = Path(__file__).resolve().parent.parent
-
-possible_files = [
-    PROJECT_DIR / "dataset" / "energydata_complete.xlsx",
-    PROJECT_DIR / "dataset" / "energydata_complete.xls",
-    PROJECT_DIR / "energydata_complete.xlsx",
-    PROJECT_DIR / "energydata_complete.xls",
-]
-
-data_file = next(
-    (file for file in possible_files if file.exists()),
-    None
-)
-
+# ---------------- TITLE ----------------
 st.title("⚡ Smart Energy Consumption & Optimization")
-st.caption(
-    "Explore energy usage patterns, identify peak periods, "
-    "and discover opportunities to improve energy efficiency."
+st.markdown(
+    "### Energy Analytics Dashboard | Exploratory Data Analysis"
+)
+st.write(
+    "Monitor energy consumption, identify high-usage appliances, "
+    "analyze consumption patterns and explore energy-saving opportunities."
 )
 
-if data_file is None:
-    st.error(
-        "Excel dataset not found. Upload energydata_complete.xlsx "
-        "inside the repository's dataset folder."
-    )
-    st.code(
-        "dataset/energydata_complete.xlsx\n"
-        "dashboard/app.py\n"
-        "dashboard/requirements.txt"
-    )
-    st.stop()
+# ---------------- LOAD DATASET ----------------
+st.sidebar.header("📁 Dataset")
+
+uploaded_file = st.sidebar.file_uploader(
+    "Upload Excel or CSV file",
+    type=["xlsx", "xls", "csv"]
+)
 
 try:
-    df = pd.read_excel(data_file)
+    if uploaded_file is not None:
+        if uploaded_file.name.lower().endswith(".csv"):
+            df = pd.read_csv(uploaded_file)
+        else:
+            df = pd.read_excel(uploaded_file)
+    else:
+        file_path = Path(__file__).parent / "cleaned_dataset.xlsx"
+
+        if not file_path.exists():
+            st.error(
+                "cleaned_dataset.xlsx not found. "
+                "Place it in the same folder as app.py or upload it using the sidebar."
+            )
+            st.stop()
+
+        df = pd.read_excel(file_path)
+
 except Exception as error:
-    st.error(f"Unable to read the Excel file: {error}")
-    st.info("Check that openpyxl is listed in requirements.txt.")
+    st.error(f"Unable to load dataset: {error}")
     st.stop()
 
-# ---------------- CLEAN COLUMN NAMES ----------------
-df.columns = df.columns.astype(str).str.strip()
+# ---------------- VALIDATE DATA ----------------
+required_columns = [
+    "Timestamp",
+    "Building_Type",
+    "Appliance",
+    "Energy_Consumption_kWh",
+    "Temperature_C",
+    "Occupancy_Percent",
+    "Tariff_Period",
+    "Renewable_Generation_kWh"
+]
 
-# Find columns without depending on capitalization
-column_lookup = {col.lower(): col for col in df.columns}
+missing_columns = [
+    col for col in required_columns if col not in df.columns
+]
 
-date_col = column_lookup.get("date")
-appliances_col = column_lookup.get("appliances")
-outside_temp_col = column_lookup.get("t_out")
-
-if date_col is None:
-    st.error(
-        "A 'date' column was not found. Available columns: "
-        + ", ".join(df.columns.astype(str))
-    )
+if missing_columns:
+    st.error("Missing columns: " + ", ".join(missing_columns))
+    st.write("Available columns:", df.columns.tolist())
     st.stop()
 
-if appliances_col is None:
-    st.error(
-        "An 'Appliances' column was not found. Available columns: "
-        + ", ".join(df.columns.astype(str))
-    )
-    st.stop()
-
-df[date_col] = pd.to_datetime(df[date_col], errors="coerce")
-df[appliances_col] = pd.to_numeric(
-    df[appliances_col], errors="coerce"
+# ---------------- DATA CLEANING ----------------
+df["Timestamp"] = pd.to_datetime(
+    df["Timestamp"], errors="coerce"
 )
 
-df = df.dropna(subset=[date_col, appliances_col]).copy()
-df = df.sort_values(date_col)
+numeric_columns = [
+    "Energy_Consumption_kWh",
+    "Temperature_C",
+    "Occupancy_Percent",
+    "Renewable_Generation_kWh"
+]
+
+for col in numeric_columns:
+    df[col] = pd.to_numeric(df[col], errors="coerce")
+
+df = df.dropna(
+    subset=["Timestamp", "Energy_Consumption_kWh"]
+)
+
+df = df[df["Energy_Consumption_kWh"] >= 0].copy()
 
 if df.empty:
-    st.error("No valid rows remain after cleaning the dataset.")
+    st.error("No valid energy readings found in the dataset.")
     st.stop()
 
-# Create time-related features
-df["Hour"] = df[date_col].dt.hour
-df["Day"] = df[date_col].dt.day
-df["Weekday"] = df[date_col].dt.day_name()
-df["Date"] = df[date_col].dt.date
-df["Month"] = df[date_col].dt.strftime("%Y-%m")
+for col in ["Building_Type", "Appliance", "Tariff_Period"]:
+    df[col] = df[col].fillna("Unknown").astype(str)
+
+df["Temperature_C"] = df["Temperature_C"].fillna(
+    df["Temperature_C"].median()
+)
+df["Occupancy_Percent"] = df["Occupancy_Percent"].fillna(0)
+df["Renewable_Generation_kWh"] = (
+    df["Renewable_Generation_kWh"].fillna(0)
+)
+
+df["Hour"] = df["Timestamp"].dt.hour
+df["Date"] = df["Timestamp"].dt.date
+df["Day"] = df["Timestamp"].dt.day_name()
 
 # ---------------- SIDEBAR FILTERS ----------------
-st.sidebar.header("🎛️ Dashboard Filters")
+st.sidebar.header("🔍 Filters")
 
-min_date = df[date_col].min().date()
-max_date = df[date_col].max().date()
+buildings = sorted(df["Building_Type"].unique())
+appliances = sorted(df["Appliance"].unique())
+tariffs = sorted(df["Tariff_Period"].unique())
 
-selected_dates = st.sidebar.date_input(
-    "Select date range",
+selected_buildings = st.sidebar.multiselect(
+    "Building Type",
+    buildings,
+    default=buildings
+)
+
+selected_appliances = st.sidebar.multiselect(
+    "Appliance",
+    appliances,
+    default=appliances
+)
+
+selected_tariffs = st.sidebar.multiselect(
+    "Tariff Period",
+    tariffs,
+    default=tariffs
+)
+
+min_date = df["Timestamp"].min().date()
+max_date = df["Timestamp"].max().date()
+
+date_range = st.sidebar.date_input(
+    "Select Date Range",
     value=(min_date, max_date),
     min_value=min_date,
     max_value=max_date
 )
 
-if isinstance(selected_dates, (tuple, list)) and len(selected_dates) == 2:
-    start_date, end_date = selected_dates
-else:
-    start_date = selected_dates
-    end_date = selected_dates
-
-filtered_df = df[
-    (df[date_col].dt.date >= start_date)
-    & (df[date_col].dt.date <= end_date)
+# ---------------- APPLY FILTERS ----------------
+filtered = df[
+    df["Building_Type"].isin(selected_buildings)
+    & df["Appliance"].isin(selected_appliances)
+    & df["Tariff_Period"].isin(selected_tariffs)
 ].copy()
 
-if filtered_df.empty:
-    st.warning("No data available for the selected dates.")
+if isinstance(date_range, (tuple, list)) and len(date_range) == 2:
+    start_date, end_date = date_range
+
+    filtered = filtered[
+        (filtered["Timestamp"].dt.date >= start_date)
+        & (filtered["Timestamp"].dt.date <= end_date)
+    ]
+
+if filtered.empty:
+    st.warning("No data found for the selected filters.")
     st.stop()
 
-# ---------------- KEY PERFORMANCE INDICATORS ----------------
-st.subheader("📊 Energy Overview")
+# ---------------- KPI METRICS ----------------
+st.header("📊 Energy Overview")
 
-average_usage = filtered_df[appliances_col].mean()
-peak_usage = filtered_df[appliances_col].max()
-minimum_usage = filtered_df[appliances_col].min()
-total_records = len(filtered_df)
+total_energy = filtered["Energy_Consumption_kWh"].sum()
+average_energy = filtered["Energy_Consumption_kWh"].mean()
+peak_reading = filtered["Energy_Consumption_kWh"].max()
+renewable_energy = filtered["Renewable_Generation_kWh"].sum()
 
-c1, c2, c3, c4 = st.columns(4)
+electricity_rate = st.sidebar.number_input(
+    "Electricity rate (₹/kWh)",
+    min_value=0.0,
+    value=8.0,
+    step=0.5
+)
 
-c1.metric("Average Appliance Reading", f"{average_usage:,.2f}")
-c2.metric("Peak Appliance Reading", f"{peak_usage:,.2f}")
-c3.metric("Minimum Reading", f"{minimum_usage:,.2f}")
-c4.metric("Total Records", f"{total_records:,}")
+estimated_cost = total_energy * electricity_rate
+
+col1, col2, col3, col4 = st.columns(4)
+
+col1.metric(
+    "Total Consumption",
+    f"{total_energy:,.2f} kWh"
+)
+
+col2.metric(
+    "Average Consumption",
+    f"{average_energy:.3f} kWh"
+)
+
+col3.metric(
+    "Highest Reading",
+    f"{peak_reading:.3f} kWh"
+)
+
+col4.metric(
+    "Estimated Cost",
+    f"₹{estimated_cost:,.2f}"
+)
+
+col5, col6 = st.columns(2)
+
+col5.metric(
+    "Renewable Generation",
+    f"{renewable_energy:,.2f} kWh"
+)
+
+renewable_share = (
+    renewable_energy / total_energy * 100
+    if total_energy > 0 else 0
+)
+
+col6.metric(
+    "Renewable / Consumption",
+    f"{renewable_share:.1f}%"
+)
 
 st.caption(
-    "Readings use the units provided by the source dataset; "
-    "they are not automatically converted to kWh."
+    "Cost is an estimate based on the selected tariff. "
+    "The highest reading represents an individual kWh reading, "
+    "not peak electrical demand in kW."
 )
 
 st.divider()
 
-# ---------------- DAILY ENERGY TREND ----------------
-st.subheader("📈 Daily Consumption Trend")
+# ---------------- ENERGY TREND ----------------
+st.header("📈 Energy Consumption Trend")
 
-daily_usage = (
-    filtered_df.groupby("Date", as_index=False)[appliances_col]
-    .mean()
+frequency = st.selectbox(
+    "Choose trend interval",
+    ["Hourly", "Daily", "Weekly"]
 )
 
-fig_daily = px.line(
-    daily_usage,
-    x="Date",
-    y=appliances_col,
+time_series = filtered.set_index("Timestamp")[
+    "Energy_Consumption_kWh"
+]
+
+if frequency == "Hourly":
+    trend = time_series.resample("h").sum()
+elif frequency == "Daily":
+    trend = time_series.resample("D").sum()
+else:
+    trend = time_series.resample("W").sum()
+
+trend_df = trend.rename("Energy (kWh)").reset_index()
+
+fig = px.line(
+    trend_df,
+    x="Timestamp",
+    y="Energy (kWh)",
     markers=True,
-    title="Average Appliance Reading by Day",
+    title=f"{frequency} Energy Consumption",
+    template="plotly_white"
+)
+
+fig.update_traces(line_color="#159570")
+fig.update_layout(
+    hovermode="x unified",
+    xaxis_title="Time",
+    yaxis_title="Energy (kWh)"
+)
+
+st.plotly_chart(fig, use_container_width=True)
+
+# ---------------- APPLIANCE ANALYSIS ----------------
+st.header("🔌 Appliance-wise Consumption")
+
+appliance_data = (
+    filtered.groupby("Appliance", as_index=False)
+    ["Energy_Consumption_kWh"]
+    .sum()
+    .sort_values("Energy_Consumption_kWh", ascending=False)
+)
+
+fig = px.bar(
+    appliance_data,
+    x="Appliance",
+    y="Energy_Consumption_kWh",
+    color="Energy_Consumption_kWh",
+    title="Energy Used by Each Appliance",
     labels={
-        "Date": "Date",
-        appliances_col: "Average Appliance Reading"
-    }
+        "Energy_Consumption_kWh": "Energy (kWh)",
+        "Appliance": "Appliance"
+    },
+    template="plotly_white",
+    color_continuous_scale="Teal"
 )
 
-fig_daily.update_layout(hovermode="x unified")
-st.plotly_chart(fig_daily, use_container_width=True)
+st.plotly_chart(fig, use_container_width=True)
 
-# ---------------- HOURLY ANALYSIS ----------------
-left, right = st.columns(2)
+if not appliance_data.empty:
+    top_appliance = appliance_data.iloc[0]["Appliance"]
+    top_value = appliance_data.iloc[0]["Energy_Consumption_kWh"]
 
-with left:
-    st.subheader("🕒 Hourly Usage Pattern")
-
-    hourly_usage = (
-        filtered_df.groupby("Hour", as_index=False)[appliances_col]
-        .mean()
+    st.info(
+        f"💡 Highest-consuming appliance in the selected data: "
+        f"**{top_appliance}** ({top_value:.2f} kWh)."
     )
 
-    fig_hourly = px.bar(
-        hourly_usage,
-        x="Hour",
-        y=appliances_col,
-        title="Average Usage by Hour",
+# ---------------- BUILDING ANALYSIS ----------------
+st.header("🏢 Building-wise Energy Consumption")
+
+building_data = (
+    filtered.groupby("Building_Type", as_index=False)
+    ["Energy_Consumption_kWh"]
+    .sum()
+    .sort_values("Energy_Consumption_kWh", ascending=False)
+)
+
+fig = px.pie(
+    building_data,
+    names="Building_Type",
+    values="Energy_Consumption_kWh",
+    hole=0.45,
+    title="Consumption Distribution by Building",
+    template="plotly_white"
+)
+
+st.plotly_chart(fig, use_container_width=True)
+
+# ---------------- HOURLY PATTERN ----------------
+st.header("🕒 Peak Usage Time Analysis")
+
+hourly_data = (
+    filtered.groupby("Hour", as_index=False)
+    ["Energy_Consumption_kWh"]
+    .mean()
+)
+
+fig = px.bar(
+    hourly_data,
+    x="Hour",
+    y="Energy_Consumption_kWh",
+    title="Average Energy Consumption by Hour",
+    labels={
+        "Hour": "Hour of Day (0–23)",
+        "Energy_Consumption_kWh": "Average Energy (kWh)"
+    },
+    template="plotly_white",
+    color="Energy_Consumption_kWh",
+    color_continuous_scale="YlGn"
+)
+
+st.plotly_chart(fig, use_container_width=True)
+
+# ---------------- ENVIRONMENT ANALYSIS ----------------
+st.header("🌡️ Temperature and Occupancy Analysis")
+
+col1, col2 = st.columns(2)
+
+with col1:
+    fig = px.scatter(
+        filtered,
+        x="Temperature_C",
+        y="Energy_Consumption_kWh",
+        color="Building_Type",
+        title="Temperature vs Energy Consumption",
         labels={
-            "Hour": "Hour of Day",
-            appliances_col: "Average Reading"
-        }
+            "Temperature_C": "Temperature (°C)",
+            "Energy_Consumption_kWh": "Energy (kWh)"
+        },
+        template="plotly_white"
     )
+    st.plotly_chart(fig, use_container_width=True)
 
-    st.plotly_chart(fig_hourly, use_container_width=True)
-
-with right:
-    st.subheader("📅 Weekly Usage Pattern")
-
-    weekday_order = [
-        "Monday", "Tuesday", "Wednesday", "Thursday",
-        "Friday", "Saturday", "Sunday"
-    ]
-
-    weekday_usage = (
-        filtered_df.groupby("Weekday")[appliances_col]
-        .mean()
-        .reindex(weekday_order)
-        .dropna()
-        .rename("Average Reading")
-        .reset_index()
-    )
-
-    fig_weekday = px.bar(
-        weekday_usage,
-        x="Weekday",
-        y="Average Reading",
-        title="Average Usage by Day of Week",
+with col2:
+    fig = px.scatter(
+        filtered,
+        x="Occupancy_Percent",
+        y="Energy_Consumption_kWh",
+        color="Appliance",
+        title="Occupancy vs Energy Consumption",
         labels={
-            "Weekday": "Day",
-            "Average Reading": "Average Appliance Reading"
-        }
+            "Occupancy_Percent": "Occupancy (%)",
+            "Energy_Consumption_kWh": "Energy (kWh)"
+        },
+        template="plotly_white"
     )
+    st.plotly_chart(fig, use_container_width=True)
 
-    st.plotly_chart(fig_weekday, use_container_width=True)
+# ---------------- ANOMALY DETECTION ----------------
+st.header("🚨 Unusual Energy Usage Alerts")
 
-# ---------------- DISTRIBUTION ANALYSIS ----------------
-st.subheader("📉 Consumption Distribution")
+q1 = filtered["Energy_Consumption_kWh"].quantile(0.25)
+q3 = filtered["Energy_Consumption_kWh"].quantile(0.75)
+iqr = q3 - q1
 
-fig_hist = px.histogram(
-    filtered_df,
-    x=appliances_col,
-    nbins=40,
-    title="Distribution of Appliance Readings",
-    labels={appliances_col: "Appliance Reading"}
+upper_limit = q3 + 1.5 * iqr
+
+anomalies = filtered[
+    filtered["Energy_Consumption_kWh"] > upper_limit
+].sort_values(
+    "Energy_Consumption_kWh",
+    ascending=False
 )
 
-st.plotly_chart(fig_hist, use_container_width=True)
+st.write(f"Statistical high-usage threshold: **{upper_limit:.3f} kWh**")
+st.write(f"Potential high-usage readings found: **{len(anomalies)}**")
 
-# ---------------- TEMPERATURE RELATIONSHIP ----------------
-if outside_temp_col is not None:
-    filtered_df[outside_temp_col] = pd.to_numeric(
-        filtered_df[outside_temp_col], errors="coerce"
-    )
-
-    temperature_df = filtered_df.dropna(
-        subset=[outside_temp_col, appliances_col]
-    )
-
-    st.subheader("🌡️ Outdoor Temperature vs Appliance Usage")
-
-    if not temperature_df.empty:
-        fig_temp = px.scatter(
-            temperature_df,
-            x=outside_temp_col,
-            y=appliances_col,
-            opacity=0.5,
-            title="Temperature and Appliance Reading",
-            labels={
-                outside_temp_col: "Outdoor Temperature",
-                appliances_col: "Appliance Reading"
-            }
-        )
-
-        st.plotly_chart(fig_temp, use_container_width=True)
-    else:
-        st.info("There are no valid temperature readings to plot.")
-
-# ---------------- CORRELATION ANALYSIS ----------------
-st.subheader("🔗 Feature Correlation")
-
-numeric_df = filtered_df.select_dtypes(include="number")
-numeric_df = numeric_df.drop(
-    columns=["Hour", "Day"], errors="ignore"
-)
-
-if numeric_df.shape[1] >= 2:
-    correlation = numeric_df.corr()
-
-    fig_corr = px.imshow(
-        correlation,
-        text_auto=".2f",
-        aspect="auto",
-        color_continuous_scale="RdBu_r",
-        zmin=-1,
-        zmax=1,
-        title="Correlation Between Numeric Features"
-    )
-
-    st.plotly_chart(fig_corr, use_container_width=True)
-else:
-    st.info("Not enough numeric columns for correlation analysis.")
-
-# ---------------- PEAK USAGE ALERTS ----------------
-st.subheader("🚨 Peak Usage Analysis")
-
-threshold = (
-    filtered_df[appliances_col].mean()
-    + 2 * filtered_df[appliances_col].std()
-)
-
-peak_rows = filtered_df[
-    filtered_df[appliances_col] > threshold
-].copy()
-
-if not peak_rows.empty:
-    st.warning(
-        f"Found {len(peak_rows):,} unusually high readings "
-        "using the mean + 2 standard deviations rule."
-    )
-
-    display_cols = [date_col, appliances_col]
-
-    if outside_temp_col is not None:
-        display_cols.append(outside_temp_col)
-
+if not anomalies.empty:
     st.dataframe(
-        peak_rows[display_cols].head(20),
-        use_container_width=True
+        anomalies[
+            [
+                "Timestamp",
+                "Building_Type",
+                "Appliance",
+                "Energy_Consumption_kWh",
+                "Temperature_C",
+                "Occupancy_Percent"
+            ]
+        ],
+        use_container_width=True,
+        hide_index=True
     )
 else:
-    st.success("No unusually high readings were detected by this rule.")
-
-# ---------------- OPTIMIZATION INSIGHTS ----------------
-st.subheader("💡 Energy Optimization Suggestions")
-
-peak_hour = (
-    filtered_df.groupby("Hour")[appliances_col]
-    .mean()
-    .idxmax()
-)
-
-lowest_hour = (
-    filtered_df.groupby("Hour")[appliances_col]
-    .mean()
-    .idxmin()
-)
-
-st.markdown(
-    f"""
-    - **Highest average usage hour:** {peak_hour}:00.
-    - **Lowest average usage hour:** {lowest_hour}:00.
-    - Review equipment operating during high-usage periods.
-    - Switch off unused appliances where operationally appropriate.
-    - Compare weekday and weekend patterns to identify potential waste.
-    - Investigate unusually high readings before making changes.
-    """
-)
+    st.success("No readings exceeded the current statistical threshold.")
 
 st.caption(
-    "These are data-based observations, not proof of energy savings. "
-    "Confirm recommendations against actual equipment and site conditions."
+    "These are potential outliers identified using the IQR method, "
+    "not confirmed equipment faults."
 )
 
-# ---------------- DATA PREVIEW & DOWNLOAD ----------------
-with st.expander("🔍 View Filtered Dataset"):
-    st.write(f"Rows: {len(filtered_df):,}")
-    st.dataframe(filtered_df.head(100), use_container_width=True)
+# ---------------- CORRELATION ANALYSIS ----------------
+st.header("🔗 Energy Factor Correlation")
 
-csv_data = filtered_df.to_csv(index=False).encode("utf-8")
+correlation = filtered[
+    [
+        "Energy_Consumption_kWh",
+        "Temperature_C",
+        "Occupancy_Percent",
+        "Renewable_Generation_kWh"
+    ]
+].corr(numeric_only=True)
+
+fig = px.imshow(
+    correlation,
+    text_auto=".2f",
+    aspect="auto",
+    zmin=-1,
+    zmax=1,
+    color_continuous_scale="RdYlGn",
+    title="Correlation Heatmap",
+    template="plotly_white"
+)
+
+st.plotly_chart(fig, use_container_width=True)
+
+st.caption(
+    "Correlation indicates association; it does not prove causation."
+)
+
+# ---------------- DATA TABLE AND DOWNLOAD ----------------
+st.header("📁 Filtered Dataset")
+
+st.dataframe(
+    filtered,
+    use_container_width=True,
+    hide_index=True
+)
+
+csv_data = filtered.to_csv(index=False).encode("utf-8")
 
 st.download_button(
-    label="⬇️ Download Filtered Data as CSV",
+    label="⬇️ Download Filtered Dataset",
     data=csv_data,
-    file_name="smart_energy_filtered_data.csv",
+    file_name="smart_energy_filtered.csv",
     mime="text/csv"
 )
 
+# ---------------- FOOTER ----------------
 st.divider()
-st.caption("Smart Energy Consumption & Optimization | EDA Dashboard")
+
+st.markdown("""
+### 🌱 Smart Energy Insights
+
+- Identify appliances with high energy consumption.
+- Examine hourly and daily consumption patterns.
+- Compare energy usage across building types.
+- Review unusual readings for possible energy waste.
+- Use the findings to plan future energy optimization.
+
+**Project:** Smart Energy Consumption & Optimization  
+**Department:** Artificial Intelligence & Data Science
+""")
+
+
