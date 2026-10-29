@@ -20,13 +20,13 @@ st.caption(
 
 PROJECT_DIR = Path(__file__).resolve().parent.parent
 
+
+   
 possible_files = [
-    PROJECT_DIR / "dataset" / "Smart_Energy_Cleaned.csv",
-    PROJECT_DIR / "dataset" / "energydata_complete.csv",
-    PROJECT_DIR / "Smart_Energy_Cleaned.csv",
-    PROJECT_DIR / "energydata_complete.csv",
-    Path("/content/Smart_Energy_Cleaned.csv"),
-    Path("/content/energydata_complete.csv"),
+    PROJECT_DIR / "dataset" / "energydata_complete.xlsx",
+    PROJECT_DIR / "energydata_complete.xlsx",
+
+
 ]
 
 data_file = next((p for p in possible_files if p.exists()), None)
