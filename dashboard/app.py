@@ -23,8 +23,10 @@ PROJECT_DIR = Path(__file__).resolve().parent.parent
 
    
 possible_files = [
-    PROJECT_DIR / "dataset" / "energydata_complete.xlsx",
-    PROJECT_DIR / "energydata_complete.xlsx",
+ PROJECT_DIR / "dataset" / "Smart_Energy_Cleaned.xlsx",
+PROJECT_DIR / "dataset" / "energydata_complete.xlsx",
+PROJECT_DIR / "Smart_Energy_Cleaned.xlsx",
+PROJECT_DIR / "energydata_complete.xlsx",
 
 
 ]
