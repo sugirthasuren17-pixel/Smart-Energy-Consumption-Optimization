@@ -1,7 +1,7 @@
-# smart energy consumption 
+#Smart Energy Consumption & Optimization
 
-## Live Dashboard
+#Live Dashboard
 
-[🚀 Open smart energy consumption Dashboard](https://smart-energy-consumption-optimization-et3svqllnhttmwdbetki6k.streamlit.app/)
+"⚡ Open Smart Energy Dashboard" (https://smart-energy-consumption-optimizatioj-ebwtroybdpbpu6pvwolrub.streamlit.app/)
 
-Explore vaccination status distributions, percentages, and submission trends using our interactive dashboard.
+Explore energy consumption patterns, appliance-wise usage, building-wise consumption, peak usage times, and energy-saving opportunities using our interactive dashboard.
